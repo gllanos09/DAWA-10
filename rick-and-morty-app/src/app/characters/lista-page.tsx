@@ -3,10 +3,9 @@ import Image from "next/image";
 import { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { IoArrowBack, IoTv } from "react-icons/io5";
-import { Character, CharacterListResponse, Episode } from "@/types/character";
+import { getCharacterById, getEpisodesFor } from "@/lib/characters";
 
-const API_URL = "https://rickandmortyapi.com/api/character";
-const REVALIDATE = 864000; // 10 días en segundos (ISR)
+const PRERENDERED_CHARACTERS = 100;
 
 interface CharacterPageProps {
   params: Promise<{ id: string }>;
@@ -18,45 +17,23 @@ const statusColors: Record<string, string> = {
   unknown: "bg-slate-500",
 };
 
-async function getCharacter(id: string): Promise<Character> {
-  const res = await fetch(`${API_URL}/${id}`, {
-    next: { revalidate: REVALIDATE }, // Revalida cada 10 días
-  });
-
-  if (res.status === 404) notFound();
-  if (!res.ok) throw new Error("Error al cargar el personaje");
-
-  return res.json();
-}
-
-async function getEpisodes(urls: string[]): Promise<Episode[]> {
-  if (urls.length === 0) return [];
-
-  const ids = urls.map((url) => url.split("/").pop()).join(",");
-
-  const res = await fetch(`https://rickandmortyapi.com/api/episode/${ids}`, {
-    next: { revalidate: REVALIDATE },
-  });
-
-  if (!res.ok) return [];
-
-  const data = await res.json();
-  return Array.isArray(data) ? data : [data];
-}
-
 export async function generateStaticParams() {
-  // Genera las rutas estáticas por Id para el total de personajes (SSG)
-  const res = await fetch(API_URL);
-  const data: CharacterListResponse = await res.json();
-
-  return Array.from({ length: data.info.count }, (_, index) => ({
+  // Prerenderizamos los primeros 100 personajes (SSG).
+  // El resto se genera bajo demanda en la primera visita y queda cacheado (ISR).
+  return Array.from({ length: PRERENDERED_CHARACTERS }, (_, index) => ({
     id: (index + 1).toString(),
   }));
 }
 
-export async function generateMetadata({ params }: CharacterPageProps): Promise<Metadata> {
+export async function generateMetadata({
+  params,
+}: CharacterPageProps): Promise<Metadata> {
   const { id } = await params;
-  const character = await getCharacter(id);
+  const character = await getCharacterById(Number(id));
+
+  if (!character) {
+    return { title: "Personaje no encontrado - Rick and Morty" };
+  }
 
   return {
     title: `${character.name} - Rick and Morty`,
@@ -66,8 +43,11 @@ export async function generateMetadata({ params }: CharacterPageProps): Promise<
 
 export default async function CharacterDetail({ params }: CharacterPageProps) {
   const { id } = await params;
-  const character = await getCharacter(id);
-  const episodes = await getEpisodes(character.episode);
+  const character = await getCharacterById(Number(id));
+
+  if (!character) notFound();
+
+  const episodes = await getEpisodesFor(character.episode);
 
   const info = [
     { label: "Estado", value: character.status },
@@ -83,6 +63,7 @@ export default async function CharacterDetail({ params }: CharacterPageProps) {
         year: "numeric",
         month: "long",
         day: "numeric",
+        timeZone: "UTC",
       }),
     },
   ];
@@ -91,7 +72,9 @@ export default async function CharacterDetail({ params }: CharacterPageProps) {
     <div className="p-8">
       <div className="max-w-4xl mx-auto bg-white rounded-2xl shadow-2xl overflow-hidden">
         <div className="bg-linear-to-r from-slate-900 to-emerald-700 p-8">
-          <h1 className="text-5xl font-bold text-white text-center">{character.name}</h1>
+          <h1 className="text-5xl font-bold text-white text-center">
+            {character.name}
+          </h1>
           <p className="text-emerald-200 text-center text-xl mt-2">
             #{character.id.toString().padStart(3, "0")}
           </p>
