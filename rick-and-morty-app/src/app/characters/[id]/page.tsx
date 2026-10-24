@@ -45,11 +45,9 @@ async function getEpisodes(urls: string[]): Promise<Episode[]> {
 }
 
 export async function generateStaticParams() {
-  // Genera las rutas estáticas por Id para el total de personajes (SSG)
-  const res = await fetch(API_URL);
-  const data: CharacterListResponse = await res.json();
-
-  return Array.from({ length: data.info.count }, (_, index) => ({
+  // Prerenderizamos los primeros 20 personajes (SSG).
+  // El resto se genera bajo demanda en la primera visita y queda cacheado (ISR).
+  return Array.from({ length: 20 }, (_, index) => ({
     id: (index + 1).toString(),
   }));
 }
