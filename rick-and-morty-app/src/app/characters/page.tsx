@@ -15,25 +15,26 @@ async function getAllCharacters(): Promise<Character[]> {
   // Forzamos el caché: la respuesta se guarda en el build y no se vuelve a pedir (SSG)
   const res = await fetch(API_URL, { cache: "force-cache" });
 
-  if (!res.ok) throw new Error("Error al cargar los personajes");
+  if (!res.ok) throw new Error(`Error ${res.status} al cargar los personajes`);
 
   const firstPage: CharacterListResponse = await res.json();
+  const characters: Character[] = [...firstPage.results];
 
-  // El API pagina de 20 en 20; pedimos las páginas restantes en paralelo
-  const otherPages = await Promise.all(
-    Array.from({ length: firstPage.info.pages - 1 }, async (_, index) => {
-      const pageRes = await fetch(`${API_URL}?page=${index + 2}`, {
-        cache: "force-cache",
-      });
+  // Pedimos las páginas una a una para no saturar el API durante el build
+  for (let page = 2; page <= firstPage.info.pages; page++) {
+    const pageRes = await fetch(`${API_URL}?page=${page}`, {
+      cache: "force-cache",
+    });
 
-      if (!pageRes.ok) throw new Error("Error al cargar los personajes");
+    if (!pageRes.ok) {
+      throw new Error(`Error ${pageRes.status} al cargar la página ${page}`);
+    }
 
-      const page: CharacterListResponse = await pageRes.json();
-      return page.results;
-    })
-  );
+    const data: CharacterListResponse = await pageRes.json();
+    characters.push(...data.results);
+  }
 
-  return [firstPage.results, ...otherPages].flat();
+  return characters;
 }
 
 export default async function CharacterList() {
