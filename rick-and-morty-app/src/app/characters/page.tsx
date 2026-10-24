@@ -20,14 +20,19 @@ async function getAllCharacters(): Promise<Character[]> {
   const firstPage: CharacterListResponse = await res.json();
   const characters: Character[] = [...firstPage.results];
 
-  // Pedimos las páginas una a una para no saturar el API durante el build
+  // Pedimos las páginas una a una, con pausa, para no saturar el API
   for (let page = 2; page <= firstPage.info.pages; page++) {
+    await new Promise((resolve) => setTimeout(resolve, 300));
+
     const pageRes = await fetch(`${API_URL}?page=${page}`, {
       cache: "force-cache",
     });
 
+    // Si el API limita las peticiones, nos quedamos con lo obtenido
+    // en lugar de romper el build; ISR completará la lista al revalidar.
     if (!pageRes.ok) {
-      throw new Error(`Error ${pageRes.status} al cargar la página ${page}`);
+      console.warn(`Página ${page} omitida: el API respondió ${pageRes.status}`);
+      break;
     }
 
     const data: CharacterListResponse = await pageRes.json();
@@ -36,7 +41,6 @@ async function getAllCharacters(): Promise<Character[]> {
 
   return characters;
 }
-
 export default async function CharacterList() {
   const characters = await getAllCharacters();
 
