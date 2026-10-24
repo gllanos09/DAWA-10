@@ -43,8 +43,3 @@ export interface CharacterFilters {
   type: string;
   gender: string;
 }
-
-export interface EpisodeListResponse {
-  info: Info;
-  results: Episode[];
-}

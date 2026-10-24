@@ -2,20 +2,11 @@ import Link from "next/link";
 import Image from "next/image";
 import { Metadata } from "next";
 import { notFound } from "next/navigation";
-import { cacheLife } from "next/cache";
 import { IoArrowBack, IoTv } from "react-icons/io5";
-import { Character, Episode } from "@/types/character";
-import { fetchJson, NotFoundError } from "@/lib/api";
+import { Character, CharacterListResponse, Episode } from "@/types/character";
 
 const API_URL = "https://rickandmortyapi.com/api/character";
-const PRERENDERED_CHARACTERS = 100;
-
-// Perfil de caché: revalidación cada 10 días (ISR)
-const CHARACTER_CACHE = {
-  stale: 86400, // 1 día en el router del cliente
-  revalidate: 864000, // 10 días: regeneración en segundo plano
-  expire: 1728000, // 20 días: máximo antes de regenerar de forma bloqueante
-};
+const REVALIDATE = 864000; // 10 días en segundos (ISR)
 
 interface CharacterPageProps {
   params: Promise<{ id: string }>;
@@ -27,53 +18,45 @@ const statusColors: Record<string, string> = {
   unknown: "bg-slate-500",
 };
 
-async function getCharacter(id: string): Promise<Character | null> {
-  "use cache";
-  cacheLife(CHARACTER_CACHE);
+async function getCharacter(id: string): Promise<Character> {
+  const res = await fetch(`${API_URL}/${id}`, {
+    next: { revalidate: REVALIDATE }, // Revalida cada 10 días
+  });
 
-  try {
-    return await fetchJson<Character>(`${API_URL}/${id}`);
-  } catch (error) {
-    if (error instanceof NotFoundError) return null;
-    throw error;
-  }
+  if (res.status === 404) notFound();
+  if (!res.ok) throw new Error("Error al cargar el personaje");
+
+  return res.json();
 }
 
 async function getEpisodes(urls: string[]): Promise<Episode[]> {
-  "use cache";
-  cacheLife(CHARACTER_CACHE);
-
   if (urls.length === 0) return [];
 
   const ids = urls.map((url) => url.split("/").pop()).join(",");
 
-  try {
-    const data = await fetchJson<Episode | Episode[]>(
-      `https://rickandmortyapi.com/api/episode/${ids}`
-    );
-    return Array.isArray(data) ? data : [data];
-  } catch {
-    return []; // Los episodios son complementarios: no deben romper la página
-  }
+  const res = await fetch(`https://rickandmortyapi.com/api/episode/${ids}`, {
+    next: { revalidate: REVALIDATE },
+  });
+
+  if (!res.ok) return [];
+
+  const data = await res.json();
+  return Array.isArray(data) ? data : [data];
 }
 
 export async function generateStaticParams() {
-  // Prerenderizamos los primeros 100 personajes (SSG).
-  // El resto se genera bajo demanda en la primera visita y queda cacheado (ISR).
-  return Array.from({ length: PRERENDERED_CHARACTERS }, (_, index) => ({
+  // Genera las rutas estáticas por Id para el total de personajes (SSG)
+  const res = await fetch(API_URL);
+  const data: CharacterListResponse = await res.json();
+
+  return Array.from({ length: data.info.count }, (_, index) => ({
     id: (index + 1).toString(),
   }));
 }
 
-export async function generateMetadata({
-  params,
-}: CharacterPageProps): Promise<Metadata> {
+export async function generateMetadata({ params }: CharacterPageProps): Promise<Metadata> {
   const { id } = await params;
   const character = await getCharacter(id);
-
-  if (!character) {
-    return { title: "Personaje no encontrado - Rick and Morty" };
-  }
 
   return {
     title: `${character.name} - Rick and Morty`,
@@ -84,9 +67,6 @@ export async function generateMetadata({
 export default async function CharacterDetail({ params }: CharacterPageProps) {
   const { id } = await params;
   const character = await getCharacter(id);
-
-  if (!character) notFound();
-
   const episodes = await getEpisodes(character.episode);
 
   const info = [
@@ -103,7 +83,6 @@ export default async function CharacterDetail({ params }: CharacterPageProps) {
         year: "numeric",
         month: "long",
         day: "numeric",
-        timeZone: "UTC",
       }),
     },
   ];
@@ -112,9 +91,7 @@ export default async function CharacterDetail({ params }: CharacterPageProps) {
     <div className="p-8">
       <div className="max-w-4xl mx-auto bg-white rounded-2xl shadow-2xl overflow-hidden">
         <div className="bg-linear-to-r from-slate-900 to-emerald-700 p-8">
-          <h1 className="text-5xl font-bold text-white text-center">
-            {character.name}
-          </h1>
+          <h1 className="text-5xl font-bold text-white text-center">{character.name}</h1>
           <p className="text-emerald-200 text-center text-xl mt-2">
             #{character.id.toString().padStart(3, "0")}
           </p>

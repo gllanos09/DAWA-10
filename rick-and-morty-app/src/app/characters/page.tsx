@@ -1,15 +1,9 @@
 import Link from "next/link";
 import Image from "next/image";
-import { Metadata } from "next";
-import { notFound } from "next/navigation";
-import { IoArrowBack, IoTv } from "react-icons/io5";
-import { getCharacterById, getEpisodesFor } from "@/lib/characters";
+import { IoList } from "react-icons/io5";
+import { Character, CharacterListResponse } from "@/types/character";
 
-const PRERENDERED_CHARACTERS = 100;
-
-interface CharacterPageProps {
-  params: Promise<{ id: string }>;
-}
+const API_URL = "https://rickandmortyapi.com/api/character";
 
 const statusColors: Record<string, string> = {
   Alive: "bg-emerald-500",
@@ -17,132 +11,78 @@ const statusColors: Record<string, string> = {
   unknown: "bg-slate-500",
 };
 
-export async function generateStaticParams() {
-  // Prerenderizamos los primeros 100 personajes (SSG).
-  // El resto se genera bajo demanda en la primera visita y queda cacheado (ISR).
-  return Array.from({ length: PRERENDERED_CHARACTERS }, (_, index) => ({
-    id: (index + 1).toString(),
-  }));
+async function getAllCharacters(): Promise<Character[]> {
+  // Forzamos el caché: la respuesta se guarda en el build y no se vuelve a pedir (SSG)
+  const res = await fetch(API_URL, { cache: "force-cache" });
+
+  if (!res.ok) throw new Error("Error al cargar los personajes");
+
+  const firstPage: CharacterListResponse = await res.json();
+
+  // El API pagina de 20 en 20; pedimos las páginas restantes en paralelo
+  const otherPages = await Promise.all(
+    Array.from({ length: firstPage.info.pages - 1 }, async (_, index) => {
+      const pageRes = await fetch(`${API_URL}?page=${index + 2}`, {
+        cache: "force-cache",
+      });
+
+      if (!pageRes.ok) throw new Error("Error al cargar los personajes");
+
+      const page: CharacterListResponse = await pageRes.json();
+      return page.results;
+    })
+  );
+
+  return [firstPage.results, ...otherPages].flat();
 }
 
-export async function generateMetadata({
-  params,
-}: CharacterPageProps): Promise<Metadata> {
-  const { id } = await params;
-  const character = await getCharacterById(Number(id));
-
-  if (!character) {
-    return { title: "Personaje no encontrado - Rick and Morty" };
-  }
-
-  return {
-    title: `${character.name} - Rick and Morty`,
-    description: `Información de ${character.name}: ${character.species}, ${character.status}`,
-  };
-}
-
-export default async function CharacterDetail({ params }: CharacterPageProps) {
-  const { id } = await params;
-  const character = await getCharacterById(Number(id));
-
-  if (!character) notFound();
-
-  const episodes = await getEpisodesFor(character.episode);
-
-  const info = [
-    { label: "Estado", value: character.status },
-    { label: "Especie", value: character.species },
-    { label: "Tipo", value: character.type || "Desconocido" },
-    { label: "Género", value: character.gender },
-    { label: "Origen", value: character.origin.name },
-    { label: "Ubicación actual", value: character.location.name },
-    { label: "Episodios", value: character.episode.length.toString() },
-    {
-      label: "Creado",
-      value: new Date(character.created).toLocaleDateString("es-PE", {
-        year: "numeric",
-        month: "long",
-        day: "numeric",
-        timeZone: "UTC",
-      }),
-    },
-  ];
+export default async function CharacterList() {
+  const characters = await getAllCharacters();
 
   return (
     <div className="p-8">
-      <div className="max-w-4xl mx-auto bg-white rounded-2xl shadow-2xl overflow-hidden">
-        <div className="bg-linear-to-r from-slate-900 to-emerald-700 p-8">
-          <h1 className="text-5xl font-bold text-white text-center">
-            {character.name}
-          </h1>
-          <p className="text-emerald-200 text-center text-xl mt-2">
-            #{character.id.toString().padStart(3, "0")}
-          </p>
-        </div>
+      <div className="max-w-7xl mx-auto">
+        <h1 className="text-4xl font-bold text-white text-left mb-2 drop-shadow-lg">
+          <IoList size={40} className="inline-block" /> Lista de Personajes (SSG)
+        </h1>
+        <p className="text-slate-400 mb-12">
+          {characters.length} personajes generados estáticamente en el build.
+        </p>
 
-        <div className="p-8">
-          <div className="flex flex-col md:flex-row gap-8">
-            <div className="flex-1 flex justify-center items-start">
-              <Image
-                width={400}
-                height={400}
-                src={character.image}
-                alt={character.name}
-                className="w-72 h-72 rounded-2xl object-cover shadow-lg"
-                priority
-              />
-            </div>
+        <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-4 gap-6">
+          {characters.map((character) => (
+            <Link
+              key={character.id}
+              href={`/characters/${character.id}`}
+              className="transform transition hover:scale-105"
+            >
+              <div className="bg-white text-slate-700 rounded-xl shadow-lg overflow-hidden hover:shadow-2xl cursor-pointer h-full">
+                <Image
+                  width={300}
+                  height={300}
+                  src={character.image}
+                  alt={character.name}
+                  className="w-full h-56 object-cover"
+                  loading="lazy" // Carga la imagen bajo demanda (Lazy Loading)
+                  priority={false}
+                />
 
-            <div className="flex-1 text-slate-700">
-              <div className="mb-6">
-                <h3 className="text-2xl font-bold mb-3">Estado</h3>
-                <span
-                  className={`${
-                    statusColors[character.status] ?? "bg-slate-400"
-                  } text-white px-4 py-2 rounded-full font-semibold`}
-                >
-                  {character.status} — {character.species}
-                </span>
-              </div>
-
-              <h3 className="text-2xl font-bold mb-3">Información</h3>
-              <div className="space-y-2">
-                {info.map((item) => (
-                  <p key={item.label}>
-                    <strong>{item.label}:</strong> {item.value}
+                <div className="p-4">
+                  <h2 className="text-lg font-bold truncate">{character.name}</h2>
+                  <p className="text-slate-500 text-sm mb-2">
+                    #{character.id.toString().padStart(3, "0")} · {character.species}
                   </p>
-                ))}
+                  <span
+                    className={`${
+                      statusColors[character.status] ?? "bg-slate-400"
+                    } text-white text-xs px-3 py-1 rounded-full font-semibold`}
+                  >
+                    {character.status}
+                  </span>
+                </div>
               </div>
-            </div>
-          </div>
-
-          <div className="mt-10 text-slate-700">
-            <h3 className="text-2xl font-bold mb-3">
-              <IoTv size={26} className="inline-block mr-2" />
-              Apariciones
-            </h3>
-            <div className="flex flex-wrap gap-2">
-              {episodes.map((episode) => (
-                <span
-                  key={episode.id}
-                  className="bg-slate-100 border border-slate-200 text-sm px-3 py-1 rounded-lg"
-                  title={episode.name}
-                >
-                  {episode.episode} · {episode.name}
-                </span>
-              ))}
-            </div>
-          </div>
-        </div>
-
-        <div className="p-8 bg-slate-50">
-          <Link
-            href="/characters"
-            className="inline-flex items-center gap-2 bg-slate-900 hover:bg-emerald-700 text-white font-bold py-3 px-6 rounded-lg transition"
-          >
-            <IoArrowBack size={20} />
-            Volver a la lista
-          </Link>
+            </Link>
+          ))}
         </div>
       </div>
     </div>
